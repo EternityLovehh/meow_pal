@@ -83,17 +83,24 @@ class _PetBodyState extends State<PetBody> with TickerProviderStateMixin {
     );
   }
 
+  final Random _rng = Random();
+  double _tiltDir = 1; // randomize the head-tilt direction each reaction
+  int _bounceSeq = 0; // guards against overlapping bounce triggers
+
   Future<void> _playBounce() async {
+    final seq = ++_bounceSeq;
     _bounce.stop();
-    // #2 Anticipation: quick squash down before launching.
+    _tiltDir = _rng.nextBool() ? 1.0 : -1.0;
+    // #2 Anticipation: a small, quick squash before the perk.
     await _bounce.animateTo(
-      -0.6,
-      duration: const Duration(milliseconds: 80),
+      -0.35,
+      duration: const Duration(milliseconds: 70),
       curve: Curves.easeOut,
     );
-    if (!mounted) return;
-    // #3 Spring: pop up and settle naturally (interruptible).
-    _bounce.animateWith(SpringSimulation(_spring, _bounce.value, 0, 12));
+    // Bail if a newer bounce superseded this one (rapid taps/reminders).
+    if (!mounted || seq != _bounceSeq) return;
+    // #3 Spring: a gentle perk + head-tilt that settles naturally.
+    _bounce.animateWith(SpringSimulation(_spring, _bounce.value, 0, 9));
   }
 
   void _playWiggle() => _wiggle.forward(from: 0);
@@ -125,15 +132,17 @@ class _PetBodyState extends State<PetBody> with TickerProviderStateMixin {
     return AnimatedBuilder(
       animation: Listenable.merge([_bounce, _wiggle, _walkBob]),
       builder: (context, child) {
-        final b = _bounce.value; // ~ -0.6 (squash) .. +overshoot .. 0
-        final scaleY = 1 + b * 0.5;
-        final scaleX = 1 - b * 0.35; // inverse coupling = squash & stretch
+        final b = _bounce.value; // spring displacement around 0
+        // Subtle "notice": a small perk + head-tilt, not a big jump.
+        final scaleY = 1 + b * 0.12;
+        final scaleX = 1 - b * 0.07;
         final bob = _walkBob.isAnimating ? sin(_walkBob.value * 2 * pi) * 4 : 0.0;
-        final hop = b * -55 + bob; // stretch up = lift; squash = settle down
+        final hop = b * -10 + bob;
+        final tilt = _wiggleAngle.value + b * 0.09 * _tiltDir;
         return Transform.translate(
           offset: Offset(0, hop),
           child: Transform.rotate(
-            angle: _wiggleAngle.value,
+            angle: tilt,
             child: Transform.scale(
               scaleX: scaleX,
               scaleY: scaleY,

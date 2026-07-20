@@ -66,6 +66,11 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   // Pet body = the 140x140 area centered in the 260x260 window.
   static const Rect _petRect = Rect.fromLTWH(60, 60, 140, 140);
 
+  // Reminder intervals (spec defaults). Become user-adjustable in the Settings
+  // screen later; lower them temporarily if you want to observe during dev.
+  static const Duration _waterInterval = Duration(minutes: 45);
+  static const Duration _standInterval = Duration(minutes: 30);
+
   // Wandering: moves the whole window; the walk-bob visual lives in PetBody.
   late final AnimationController _walk;
   Offset _walkFrom = Offset.zero;
@@ -102,11 +107,9 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
     });
     _initWorkArea();
 
-    // NOTE: spec defaults are water 45 min / stand 30 min. Using short test
-    // intervals now so reminders are easy to observe; moves to Settings later.
     _reminders = ReminderScheduler(
-      water: const Duration(seconds: 10),
-      stand: const Duration(seconds: 16),
+      water: _waterInterval,
+      stand: _standInterval,
       onWater: () => _play(Reactions.water),
       onStand: () => _play(Reactions.stand),
     )..start();

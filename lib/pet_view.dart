@@ -6,8 +6,6 @@ import 'package:rive/rive.dart';
 /// directly. This .riv provides the good-looking idle/gaze art; richer
 /// reactions (bounce, wiggle, etc.) are layered on top at the Flutter level.
 class RiveCatController {
-  StateMachineController? _sm;
-
   void onRiveInit(Artboard artboard) {
     final sm = StateMachineController.fromArtboard(artboard, 'State Machine 1');
     if (sm == null) {
@@ -17,26 +15,8 @@ class RiveCatController {
       }
       return;
     }
+    // The artboard retains the controller, so we do not keep a reference.
     artboard.addController(sm);
-    _sm = sm;
-  }
-
-  /// Fire a trigger input by name (no-op if absent / wrong type).
-  void fireTrigger(String name) {
-    final input = _sm?.findInput<bool>(name);
-    if (input is SMITrigger) input.fire();
-  }
-
-  /// Set a boolean input by name.
-  void setBool(String name, {required bool value}) {
-    final input = _sm?.findInput<bool>(name);
-    if (input is SMIBool) input.value = value;
-  }
-
-  /// Set a number input by name.
-  void setNumber(String name, double value) {
-    final input = _sm?.findInput<double>(name);
-    if (input is SMINumber) input.value = value;
   }
 }
 
