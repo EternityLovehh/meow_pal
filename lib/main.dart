@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
+import 'pet_view.dart';
 
 Future<void> main() async {
   // Engine + window_manager must init before touching the window.
@@ -49,9 +50,7 @@ class PetHome extends StatefulWidget {
 }
 
 class _PetHomeState extends State<PetHome> {
-  // Must live on the State object (not inside build) so it survives rebuilds.
-  Color _color = Colors.deepPurple;
-
+  final RiveCatController _cat = RiveCatController();
   late final ClickThroughController _clickThrough;
 
   @override
@@ -76,17 +75,16 @@ class _PetHomeState extends State<PetHome> {
       backgroundColor: Colors.transparent,
       body: Center(
         child: GestureDetector(
-          // Tap toggles color (proves clicks land); drag moves the window.
-          onTap: () => setState(() {
-            _color = _color == Colors.deepPurple ? Colors.teal : Colors.deepPurple;
-          }),
+          // Tap will drive reactions later; drag moves the window.
+          onTap: () => debugPrint('meow_pal: tapped cat'),
           onPanStart: (_) => windowManager.startDragging(),
-          child: Container(
+          child: SizedBox(
             width: 140,
             height: 140,
-            decoration: BoxDecoration(color: _color, shape: BoxShape.circle),
+            child: PetView(controller: _cat),
           ),
         ),
+
       ),
     );
   }
