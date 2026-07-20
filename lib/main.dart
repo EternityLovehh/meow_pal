@@ -7,6 +7,7 @@ import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
 import 'particles.dart';
+import 'pet_body.dart';
 import 'pet_view.dart';
 import 'reactions.dart';
 import 'reminders.dart';
@@ -54,23 +55,18 @@ class PetHome extends StatefulWidget {
   State<PetHome> createState() => _PetHomeState();
 }
 
-class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
+/// Orchestrator: wires input + scheduling to reactions. Body animation lives in
+/// PetBody; particles in ParticleField; the bubble animates itself.
+class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   final RiveCatController _cat = RiveCatController();
+  final PetBodyController _body = PetBodyController();
+  final ParticleController _particles = ParticleController();
   late final ClickThroughController _clickThrough;
 
   // Pet body = the 140x140 area centered in the 260x260 window.
   static const Rect _petRect = Rect.fromLTWH(60, 60, 140, 140);
 
-  // Bounce (tap/reminder pop) with squash & stretch.
-  late final AnimationController _bounce;
-  late final Animation<double> _bounceScale;
-  late final Animation<double> _hopOffset;
-
-  // Swing/wiggle (picked up / dragged).
-  late final AnimationController _wiggle;
-  late final Animation<double> _wiggleAngle;
-
-  // Wandering: moves the whole window around the screen a few times a day.
+  // Wandering: moves the whole window; the walk-bob visual lives in PetBody.
   late final AnimationController _walk;
   Offset _walkFrom = Offset.zero;
   Offset _walkTo = Offset.zero;
@@ -78,7 +74,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   Timer? _wanderTimer;
 
   final Random _random = Random();
-  final ParticleController _particles = ParticleController();
   late final ReminderScheduler _reminders;
   Timer? _idleTimer;
 
@@ -90,57 +85,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     super.initState();
     _clickThrough = ClickThroughController(petBounds: () => _petRect)..start();
 
-    _bounce = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 600),
-    );
-    _bounceScale = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween(begin: 1.0, end: 1.32)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 30,
-      ),
-      TweenSequenceItem(
-        tween: Tween(begin: 1.32, end: 1.0)
-            .chain(CurveTween(curve: Curves.elasticOut)),
-        weight: 70,
-      ),
-    ]).animate(_bounce);
-    _hopOffset = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween(begin: 0.0, end: -34.0)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 35,
-      ),
-      TweenSequenceItem(
-        tween: Tween(begin: -34.0, end: 0.0)
-            .chain(CurveTween(curve: Curves.bounceOut)),
-        weight: 65,
-      ),
-    ]).animate(_bounce);
-
-    _wiggle = AnimationController(
-      vsync: this,
-      duration: const Duration(milliseconds: 450),
-    );
-    _wiggleAngle = TweenSequence<double>([
-      TweenSequenceItem(
-        tween: Tween(begin: 0.0, end: -0.18)
-            .chain(CurveTween(curve: Curves.easeOut)),
-        weight: 25,
-      ),
-      TweenSequenceItem(
-        tween: Tween(begin: -0.18, end: 0.18)
-            .chain(CurveTween(curve: Curves.easeInOut)),
-        weight: 40,
-      ),
-      TweenSequenceItem(
-        tween: Tween(begin: 0.18, end: 0.0)
-            .chain(CurveTween(curve: Curves.elasticOut)),
-        weight: 35,
-      ),
-    ]).animate(_wiggle);
-
     _walk = AnimationController(vsync: this);
     _walk.addListener(() {
       final pos = Offset.lerp(
@@ -151,7 +95,10 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
       windowManager.setPosition(pos);
     });
     _walk.addStatusListener((status) {
-      if (status == AnimationStatus.completed) _scheduleWander();
+      if (status == AnimationStatus.completed) {
+        _body.setWalking(false);
+        _scheduleWander();
+      }
     });
     _initWorkArea();
 
@@ -167,14 +114,13 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     _scheduleIdle();
   }
 
-  /// Runs a reaction: play its animation, speak a random line, spray particles.
-  /// One entry point so every trigger behaves consistently.
+  /// One entry point: play a reaction's animation, line and particles.
   void _play(Reaction r) {
     switch (r.anim) {
       case ReactionAnim.bounce:
-        _bounce.forward(from: 0);
+        _body.bounce();
       case ReactionAnim.wiggle:
-        _wiggle.forward(from: 0);
+        _body.wiggle();
       case null:
         break;
     }
@@ -246,10 +192,10 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     }
     _walkFrom = from;
     _walkTo = to;
-    // Slow stroll (~90 px/s), clamped to a sane duration.
     _walk.duration = Duration(
       milliseconds: (dist / 90 * 1000).clamp(700, 4500).round(),
     );
+    _body.setWalking(true);
     _walk.forward(from: 0);
   }
 
@@ -259,8 +205,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     _idleTimer?.cancel();
     _wanderTimer?.cancel();
     _reminders.dispose();
-    _bounce.dispose();
-    _wiggle.dispose();
     _walk.dispose();
     _clickThrough.dispose();
     super.dispose();
@@ -272,61 +216,28 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
       backgroundColor: Colors.transparent,
       body: Stack(
         children: [
-          // Cat, centered so it lines up with _petRect (used by click-through).
           Center(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => _play(Reactions.tap),
               onPanStart: (_) {
-                _walk.stop(); // stop roaming while the user carries it
+                _walk.stop();
+                _body.setWalking(false);
                 _play(Reactions.drag);
                 windowManager.startDragging();
                 _scheduleWander(); // resume roaming after a perch
               },
-              child: AnimatedBuilder(
-                animation: Listenable.merge([_bounce, _wiggle, _walk]),
-                builder: (context, child) {
-                  final s = _bounceScale.value;
-                  // Squash & stretch: taller -> narrower, and vice versa.
-                  final sx = 1 - (s - 1) * 0.7;
-                  final walkBob =
-                      _walk.isAnimating ? sin(_walk.value * pi * 6) * 4 : 0.0;
-                  return Transform.translate(
-                    offset: Offset(0, _hopOffset.value + walkBob),
-                    child: Transform.rotate(
-                      angle: _wiggleAngle.value,
-                      child: Transform.scale(
-                        scaleX: sx,
-                        scaleY: s,
-                        alignment: Alignment.bottomCenter,
-                        child: child,
-                      ),
-                    ),
-                  );
-                },
-                child: SizedBox(
-                  width: 140,
-                  height: 140,
-                  // Rive registers its own pointer recognizers for hit-testing;
-                  // combined with windowManager.startDragging() (which lets the
-                  // OS steal the pointer) that leaves a stale pointer and
-                  // crashes. We handle gestures ourselves, so make the Rive
-                  // widget ignore pointers.
-                  child: IgnorePointer(child: PetView(controller: _cat)),
-                ),
-              ),
+              child: PetBody(controller: _body, riveController: _cat),
             ),
           ),
-          // Floating emoji particles (hearts on tap, sparkles on reminders...).
           Positioned.fill(child: ParticleField(controller: _particles)),
-          // Speech bubble, floating in the transparent area above the cat.
-          if (_bubble != null)
-            Positioned(
-              top: 4,
-              left: 0,
-              right: 0,
-              child: Center(child: SpeechBubble(text: _bubble)),
-            ),
+          // Always mounted so it can animate its own exit when text clears.
+          Positioned(
+            top: 4,
+            left: 0,
+            right: 0,
+            child: Center(child: SpeechBubble(text: _bubble)),
+          ),
         ],
       ),
     );

@@ -56,10 +56,10 @@ class _ParticleFieldState extends State<ParticleField>
     for (var i = 0; i < count; i++) {
       _particles.add(_Particle(
         emoji: emoji,
-        x: (_rng.nextDouble() - 0.5) * 60,
-        vx: (_rng.nextDouble() - 0.5) * 30,
-        vy: -(45 + _rng.nextDouble() * 45),
-        lifetime: 1.2 + _rng.nextDouble() * 0.8,
+        x: (_rng.nextDouble() - 0.5) * 80,
+        vx: (_rng.nextDouble() - 0.5) * 40,
+        vy: -(80 + _rng.nextDouble() * 55), // rise faster so they float away
+        lifetime: 1.3 + _rng.nextDouble() * 0.7,
       ));
     }
     if (!_ticker.isActive) {
@@ -94,7 +94,8 @@ class _ParticleFieldState extends State<ParticleField>
       child: LayoutBuilder(
         builder: (context, constraints) {
           final cx = constraints.maxWidth / 2;
-          final baseY = constraints.maxHeight * 0.42; // emit around the head
+          // Emit above the head so particles rise up and away (not on the face).
+          final baseY = constraints.maxHeight * 0.28;
           return Stack(
             children: [
               for (final p in _particles)

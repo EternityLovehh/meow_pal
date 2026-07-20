@@ -36,7 +36,7 @@ abstract final class Reactions {
 
   static const Reaction water = Reaction(
     anim: ReactionAnim.bounce,
-    lines: <String>['该喝水啦!', '补个水,冲鸭💧', '干了这杯白开水!', '喉咙渴不渴呀~'],
+    lines: <String>['该喝水啦!', '补个水,冲鸭~', '干了这杯白开水!', '喉咙渴不渴呀~'],
     emoji: '💧',
   );
 
