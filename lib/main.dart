@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:math';
 
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
 import 'pet_view.dart';
+import 'reminders.dart';
 import 'speech_bubble.dart';
 
 Future<void> main() async {
@@ -71,7 +73,21 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
     '摸鱼被我抓到啦😼',
     '喵?',
   ];
-  int _lineIndex = 0;
+  static const List<String> _waterLines = <String>[
+    '该喝水啦!',
+    '补个水,冲鸭💧',
+    '干了这杯白开水!',
+    '喉咙渴不渴呀~',
+  ];
+  static const List<String> _standLines = <String>[
+    '站起来动动~',
+    '久坐会变石雕哦!',
+    '伸个懒腰,一起!',
+    '起来走两步鸭!',
+  ];
+  final Random _random = Random();
+
+  late final ReminderScheduler _reminders;
 
   @override
   void initState() {
@@ -108,11 +124,20 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
         weight: 65,
       ),
     ]).animate(_bounce);
+
+    // NOTE: spec defaults are water 45 min / stand 30 min. Using short test
+    // intervals now so reminders are easy to observe; moves to Settings later.
+    _reminders = ReminderScheduler(
+      water: const Duration(seconds: 10),
+      stand: const Duration(seconds: 16),
+      onWater: () => _react(_waterLines),
+      onStand: () => _react(_standLines),
+    )..start();
   }
 
-  void _reactToTap() {
-    _bounce.forward(from: 0); // replay from the start on every tap
-    _say(_tapLines[_lineIndex++ % _tapLines.length]);
+  void _react(List<String> lines) {
+    _bounce.forward(from: 0); // replay the bounce from the start
+    _say(lines[_random.nextInt(lines.length)]);
   }
 
   void _say(String text) {
@@ -126,6 +151,7 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   @override
   void dispose() {
     _bubbleTimer?.cancel();
+    _reminders.dispose();
     _bounce.dispose();
     _clickThrough.dispose();
     super.dispose();
@@ -140,7 +166,7 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
           // Cat, centered so it lines up with _petRect (used by click-through).
           Center(
             child: GestureDetector(
-              onTap: _reactToTap,
+              onTap: () => _react(_tapLines),
               onPanStart: (_) => windowManager.startDragging(),
               child: AnimatedBuilder(
                 animation: _bounce,
