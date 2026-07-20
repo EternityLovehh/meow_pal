@@ -1,11 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
 import 'pet_view.dart';
+import 'speech_bubble.dart';
 
 Future<void> main() async {
-  // Engine + window_manager must init before touching the window.
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
 
@@ -18,9 +20,7 @@ Future<void> main() async {
 
   await windowManager.waitUntilReadyToShow(windowOptions, () async {
     // Window chrome (borderless + transparency) is configured natively in
-    // macos/Runner/MainFlutterWindow.swift. Do NOT call setTitleBarStyle() or
-    // setAsFrameless() here: they poke titled-window buttons and will crash or
-    // re-break transparency on a borderless window.
+    // macos/Runner/MainFlutterWindow.swift.
     await windowManager.setBackgroundColor(Colors.transparent);
     await windowManager.setAlwaysOnTop(true);
     await windowManager.setSkipTaskbar(true);
@@ -49,21 +49,84 @@ class PetHome extends StatefulWidget {
   State<PetHome> createState() => _PetHomeState();
 }
 
-class _PetHomeState extends State<PetHome> {
+// SingleTickerProviderStateMixin provides the `vsync` the AnimationController needs.
+class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   final RiveCatController _cat = RiveCatController();
   late final ClickThroughController _clickThrough;
+
+  // Pet body = the 140x140 area centered in the 260x260 window.
+  static const Rect _petRect = Rect.fromLTWH(60, 60, 140, 140);
+
+  // A squash/stretch "bounce" reaction, driven explicitly.
+  late final AnimationController _bounce;
+  late final Animation<double> _bounceScale;
+  late final Animation<double> _hopOffset;
+
+  String? _bubble;
+  Timer? _bubbleTimer;
+
+  static const List<String> _tapLines = <String>[
+    '嗯哼~',
+    '在的在的!',
+    '摸鱼被我抓到啦😼',
+    '喵?',
+  ];
+  int _lineIndex = 0;
 
   @override
   void initState() {
     super.initState();
-    // Pet body = the 140x140 circle centered in the 260x260 window.
-    _clickThrough = ClickThroughController(
-      petBounds: () => const Rect.fromLTWH(60, 60, 140, 140),
-    )..start();
+    _clickThrough = ClickThroughController(petBounds: () => _petRect)..start();
+
+    _bounce = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 600),
+    );
+    // Big scale pop, then settle back with an elastic wobble.
+    _bounceScale = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 1.0, end: 1.32)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 30,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 1.32, end: 1.0)
+            .chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 70,
+      ),
+    ]).animate(_bounce);
+    // Hop up, then drop back down with a bouncy landing.
+    _hopOffset = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 0.0, end: -34.0)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 35,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -34.0, end: 0.0)
+            .chain(CurveTween(curve: Curves.bounceOut)),
+        weight: 65,
+      ),
+    ]).animate(_bounce);
+  }
+
+  void _reactToTap() {
+    _bounce.forward(from: 0); // replay from the start on every tap
+    _say(_tapLines[_lineIndex++ % _tapLines.length]);
+  }
+
+  void _say(String text) {
+    setState(() => _bubble = text);
+    _bubbleTimer?.cancel();
+    _bubbleTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) setState(() => _bubble = null);
+    });
   }
 
   @override
   void dispose() {
+    _bubbleTimer?.cancel();
+    _bounce.dispose();
     _clickThrough.dispose();
     super.dispose();
   }
@@ -71,20 +134,38 @@ class _PetHomeState extends State<PetHome> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Scaffold must be transparent too, or it repaints a solid background.
       backgroundColor: Colors.transparent,
-      body: Center(
-        child: GestureDetector(
-          // Tap will drive reactions later; drag moves the window.
-          onTap: () => debugPrint('meow_pal: tapped cat'),
-          onPanStart: (_) => windowManager.startDragging(),
-          child: SizedBox(
-            width: 140,
-            height: 140,
-            child: PetView(controller: _cat),
+      body: Stack(
+        children: [
+          // Cat, centered so it lines up with _petRect (used by click-through).
+          Center(
+            child: GestureDetector(
+              onTap: _reactToTap,
+              onPanStart: (_) => windowManager.startDragging(),
+              child: AnimatedBuilder(
+                animation: _bounce,
+                builder: (context, child) => Transform.translate(
+                  offset: Offset(0, _hopOffset.value),
+                  child:
+                      Transform.scale(scale: _bounceScale.value, child: child),
+                ),
+                child: SizedBox(
+                  width: 140,
+                  height: 140,
+                  child: PetView(controller: _cat),
+                ),
+              ),
+            ),
           ),
-        ),
-
+          // Speech bubble, floating in the transparent area above the cat.
+          if (_bubble != null)
+            Positioned(
+              top: 4,
+              left: 0,
+              right: 0,
+              child: Center(child: SpeechBubble(text: _bubble)),
+            ),
+        ],
       ),
     );
   }
