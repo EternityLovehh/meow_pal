@@ -1,29 +1,31 @@
 import 'dart:async';
 
-/// Fires water / stand reminders on fixed intervals.
-///
-/// Single responsibility: it only knows "it's time" and calls back. It does
-/// not know how the pet reacts — that keeps scheduling testable and lets the
-/// UI decide the animation/line.
+/// Fires water / stand reminders on fixed intervals. Reconfigurable at runtime
+/// (from Settings): [configure] cancels and re-arms the timers, skipping any
+/// reminder that is disabled.
 class ReminderScheduler {
-  ReminderScheduler({
-    required this.water,
-    required this.stand,
-    required this.onWater,
-    required this.onStand,
-  });
+  ReminderScheduler({required this.onWater, required this.onStand});
 
-  final Duration water;
-  final Duration stand;
   final void Function() onWater;
   final void Function() onStand;
 
   Timer? _waterTimer;
   Timer? _standTimer;
 
-  void start() {
-    _waterTimer = Timer.periodic(water, (_) => onWater());
-    _standTimer = Timer.periodic(stand, (_) => onStand());
+  void configure({
+    required bool waterEnabled,
+    required Duration water,
+    required bool standEnabled,
+    required Duration stand,
+  }) {
+    _waterTimer?.cancel();
+    _standTimer?.cancel();
+    if (waterEnabled) {
+      _waterTimer = Timer.periodic(water, (_) => onWater());
+    }
+    if (standEnabled) {
+      _standTimer = Timer.periodic(stand, (_) => onStand());
+    }
   }
 
   void dispose() {

@@ -11,6 +11,9 @@ import 'pet_body.dart';
 import 'pet_view.dart';
 import 'reactions.dart';
 import 'reminders.dart';
+import 'settings.dart';
+import 'settings_panel.dart';
+import 'settings_store.dart';
 import 'speech_bubble.dart';
 
 Future<void> main() async {
@@ -63,13 +66,12 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   final ParticleController _particles = ParticleController();
   late final ClickThroughController _clickThrough;
 
-  // Pet body = the 140x140 area centered in the 260x260 window.
+  // Interactive region (window-local): the cat body.
   static const Rect _petRect = Rect.fromLTWH(60, 60, 140, 140);
 
-  // Reminder intervals (spec defaults). Become user-adjustable in the Settings
-  // screen later; lower them temporarily if you want to observe during dev.
-  static const Duration _waterInterval = Duration(minutes: 45);
-  static const Duration _standInterval = Duration(minutes: 30);
+  final SettingsStore _store = SettingsStore();
+  Settings _settings = const Settings();
+  bool _settingsOpen = false;
 
   // Wandering: moves the whole window; the walk-bob visual lives in PetBody.
   late final AnimationController _walk;
@@ -88,7 +90,9 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   @override
   void initState() {
     super.initState();
-    _clickThrough = ClickThroughController(petBounds: () => _petRect)..start();
+    _clickThrough = ClickThroughController(
+      hitTest: (local) => _settingsOpen || _petRect.contains(local),
+    )..start();
 
     _walk = AnimationController(vsync: this);
     _walk.addListener(() {
@@ -108,13 +112,57 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
     _initWorkArea();
 
     _reminders = ReminderScheduler(
-      water: _waterInterval,
-      stand: _standInterval,
       onWater: () => _play(Reactions.water),
       onStand: () => _play(Reactions.stand),
-    )..start();
+    );
+    _loadSettings();
 
     _scheduleIdle();
+  }
+
+  Future<void> _loadSettings() async {
+    final s = await _store.load();
+    if (!mounted) return;
+    setState(() => _settings = s);
+    _applyReminderSchedule();
+  }
+
+  void _applySettings(Settings s) {
+    setState(() => _settings = s);
+    _applyReminderSchedule();
+    _store.save(s);
+  }
+
+  void _applyReminderSchedule() {
+    _reminders.configure(
+      waterEnabled: _settings.waterEnabled,
+      water: Duration(minutes: _settings.waterMinutes),
+      standEnabled: _settings.standEnabled,
+      stand: Duration(minutes: _settings.standMinutes),
+    );
+  }
+
+  Future<void> _openSettings() async {
+    // Pause wandering and nudge the window fully on-screen so the panel is not
+    // clipped by a screen edge.
+    _walk.stop();
+    _body.setWalking(false);
+    _wanderTimer?.cancel();
+    final wa = _workArea;
+    if (wa != null) {
+      final pos = await windowManager.getPosition();
+      final safe = Offset(
+        pos.dx.clamp(wa.left, wa.right - 260),
+        pos.dy.clamp(wa.top, wa.bottom - 260),
+      );
+      if (safe != pos) await windowManager.setPosition(safe);
+    }
+    if (mounted) setState(() => _settingsOpen = true);
+  }
+
+  void _closeSettings() {
+    setState(() => _settingsOpen = false);
+    _scheduleWander();
   }
 
   /// One entry point: play a reaction's animation, line and particles.
@@ -223,6 +271,8 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
               onTap: () => _play(Reactions.tap),
+              onSecondaryTap: _openSettings, // right-click opens settings
+              onLongPress: _openSettings, // long-press too (trackpad-friendly)
               onPanStart: (_) {
                 _walk.stop();
                 _body.setWalking(false);
@@ -241,6 +291,15 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
             right: 0,
             child: Center(child: SpeechBubble(text: _bubble)),
           ),
+          if (_settingsOpen)
+            Positioned.fill(
+              child: SettingsPanel(
+                settings: _settings,
+                onChanged: _applySettings,
+                onClose: _closeSettings,
+                onQuit: () => windowManager.destroy(),
+              ),
+            ),
         ],
       ),
     );

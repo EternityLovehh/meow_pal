@@ -4,24 +4,21 @@ import 'dart:ui';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
-/// Makes a transparent pet window "click-through" everywhere except on the pet
-/// body.
+/// Makes a transparent pet window "click-through" everywhere except over the
+/// interactive areas the app cares about.
 ///
-/// The whole window is a rectangle, but we only want the pet itself to catch
-/// the mouse — clicks on the transparent area should fall through to whatever
-/// is behind. `setIgnoreMouseEvents` is window-wide (all or nothing), so we
-/// poll the global cursor position on a timer and flip it:
-///   - cursor over the pet  -> ignore = false (pet is clickable / draggable)
-///   - cursor anywhere else -> ignore = true  (clicks pass through)
+/// `setIgnoreMouseEvents` is window-wide (all or nothing), so we poll the
+/// global cursor and flip it based on [hitTest]:
+///   - cursor over an interactive area -> ignore = false (clickable)
+///   - anywhere else                   -> ignore = true  (clicks pass through)
 ///
-/// We poll the *global* cursor (not Flutter hover) on purpose: while the window
-/// is ignoring the mouse, Flutter receives no hover events, so global polling is
-/// the only way to know when the cursor comes back over the pet.
+/// [hitTest] takes the cursor in window-local coordinates and returns whether
+/// it is over something interactive (the cat, a button, or — when a panel is
+/// open — the whole window).
 class ClickThroughController {
-  ClickThroughController({required this.petBounds});
+  ClickThroughController({required this.hitTest});
 
-  /// Pet body rect in logical window coordinates (origin = window top-left).
-  final Rect Function() petBounds;
+  final bool Function(Offset local) hitTest;
 
   Timer? _timer;
   bool? _ignoring; // last applied state; null = not set yet
@@ -40,11 +37,9 @@ class ClickThroughController {
       return; // window not ready / transient failure — skip this tick
     }
 
-    final local = cursor - windowPos; // cursor in window-local coordinates
-    final overPet = petBounds().contains(local);
-    final shouldIgnore = !overPet;
+    final local = cursor - windowPos;
+    final shouldIgnore = !hitTest(local);
 
-    // Only call across the platform channel when the state actually changes.
     if (_ignoring != shouldIgnore) {
       _ignoring = shouldIgnore;
       await windowManager.setIgnoreMouseEvents(shouldIgnore);
