@@ -52,7 +52,7 @@ class PetHome extends StatefulWidget {
 }
 
 // SingleTickerProviderStateMixin provides the `vsync` the AnimationController needs.
-class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
+class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   final RiveCatController _cat = RiveCatController();
   late final ClickThroughController _clickThrough;
 
@@ -63,6 +63,10 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
   late final AnimationController _bounce;
   late final Animation<double> _bounceScale;
   late final Animation<double> _hopOffset;
+
+  // A swing/wiggle reaction for when the cat is picked up (dragged).
+  late final AnimationController _wiggle;
+  late final Animation<double> _wiggleAngle;
 
   String? _bubble;
   Timer? _bubbleTimer;
@@ -84,6 +88,12 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
     '久坐会变石雕哦!',
     '伸个懒腰,一起!',
     '起来走两步鸭!',
+  ];
+  static const List<String> _dragLines = <String>[
+    '喵呜——!',
+    '放我下来啦~',
+    '飞起来咯!',
+    '晕…别晃我啦~',
   ];
   final Random _random = Random();
 
@@ -125,6 +135,29 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
       ),
     ]).animate(_bounce);
 
+    _wiggle = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 450),
+    );
+    // Swing left, right, then settle back with a little elastic wobble.
+    _wiggleAngle = TweenSequence<double>([
+      TweenSequenceItem(
+        tween: Tween(begin: 0.0, end: -0.18)
+            .chain(CurveTween(curve: Curves.easeOut)),
+        weight: 25,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: -0.18, end: 0.18)
+            .chain(CurveTween(curve: Curves.easeInOut)),
+        weight: 40,
+      ),
+      TweenSequenceItem(
+        tween: Tween(begin: 0.18, end: 0.0)
+            .chain(CurveTween(curve: Curves.elasticOut)),
+        weight: 35,
+      ),
+    ]).animate(_wiggle);
+
     // NOTE: spec defaults are water 45 min / stand 30 min. Using short test
     // intervals now so reminders are easy to observe; moves to Settings later.
     _reminders = ReminderScheduler(
@@ -153,6 +186,7 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
     _bubbleTimer?.cancel();
     _reminders.dispose();
     _bounce.dispose();
+    _wiggle.dispose();
     _clickThrough.dispose();
     super.dispose();
   }
@@ -166,19 +200,32 @@ class _PetHomeState extends State<PetHome> with SingleTickerProviderStateMixin {
           // Cat, centered so it lines up with _petRect (used by click-through).
           Center(
             child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
               onTap: () => _react(_tapLines),
-              onPanStart: (_) => windowManager.startDragging(),
+              onPanStart: (_) {
+                _wiggle.forward(from: 0);
+                _say(_dragLines[_random.nextInt(_dragLines.length)]);
+                windowManager.startDragging();
+              },
               child: AnimatedBuilder(
-                animation: _bounce,
+                animation: Listenable.merge([_bounce, _wiggle]),
                 builder: (context, child) => Transform.translate(
                   offset: Offset(0, _hopOffset.value),
-                  child:
-                      Transform.scale(scale: _bounceScale.value, child: child),
+                  child: Transform.rotate(
+                    angle: _wiggleAngle.value,
+                    child: Transform.scale(
+                        scale: _bounceScale.value, child: child),
+                  ),
                 ),
                 child: SizedBox(
                   width: 140,
                   height: 140,
-                  child: PetView(controller: _cat),
+                  // Rive registers its own pointer recognizers for hit-testing;
+                  // combined with windowManager.startDragging() (which lets the
+                  // OS steal the pointer) that leaves a stale pointer and
+                  // crashes. We handle gestures ourselves, so make the Rive
+                  // widget ignore pointers.
+                  child: IgnorePointer(child: PetView(controller: _cat)),
                 ),
               ),
             ),
