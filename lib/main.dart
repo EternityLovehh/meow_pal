@@ -2,11 +2,13 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/material.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
 import 'particles.dart';
 import 'pet_view.dart';
+import 'reactions.dart';
 import 'reminders.dart';
 import 'speech_bubble.dart';
 
@@ -52,7 +54,6 @@ class PetHome extends StatefulWidget {
   State<PetHome> createState() => _PetHomeState();
 }
 
-// SingleTickerProviderStateMixin provides the `vsync` the AnimationController needs.
 class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   final RiveCatController _cat = RiveCatController();
   late final ClickThroughController _clickThrough;
@@ -60,54 +61,29 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   // Pet body = the 140x140 area centered in the 260x260 window.
   static const Rect _petRect = Rect.fromLTWH(60, 60, 140, 140);
 
-  // A squash/stretch "bounce" reaction, driven explicitly.
+  // Bounce (tap/reminder pop) with squash & stretch.
   late final AnimationController _bounce;
   late final Animation<double> _bounceScale;
   late final Animation<double> _hopOffset;
 
-  // A swing/wiggle reaction for when the cat is picked up (dragged).
+  // Swing/wiggle (picked up / dragged).
   late final AnimationController _wiggle;
   late final Animation<double> _wiggleAngle;
 
-  String? _bubble;
-  Timer? _bubbleTimer;
+  // Wandering: moves the whole window around the screen a few times a day.
+  late final AnimationController _walk;
+  Offset _walkFrom = Offset.zero;
+  Offset _walkTo = Offset.zero;
+  Rect? _workArea;
+  Timer? _wanderTimer;
 
-  static const List<String> _tapLines = <String>[
-    '嗯哼~',
-    '在的在的!',
-    '摸鱼被我抓到啦😼',
-    '喵?',
-  ];
-  static const List<String> _waterLines = <String>[
-    '该喝水啦!',
-    '补个水,冲鸭💧',
-    '干了这杯白开水!',
-    '喉咙渴不渴呀~',
-  ];
-  static const List<String> _standLines = <String>[
-    '站起来动动~',
-    '久坐会变石雕哦!',
-    '伸个懒腰,一起!',
-    '起来走两步鸭!',
-  ];
-  static const List<String> _dragLines = <String>[
-    '喵呜——!',
-    '放我下来啦~',
-    '飞起来咯!',
-    '晕…别晃我啦~',
-  ];
-  static const List<String> _idleLines = <String>[
-    '喵~',
-    '在忙吗?',
-    '(打了个哈欠)',
-    '陪陪我嘛~',
-    '发会儿呆…',
-  ];
   final Random _random = Random();
-
   final ParticleController _particles = ParticleController();
   late final ReminderScheduler _reminders;
   Timer? _idleTimer;
+
+  String? _bubble;
+  Timer? _bubbleTimer;
 
   @override
   void initState() {
@@ -118,7 +94,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 600),
     );
-    // Big scale pop, then settle back with an elastic wobble.
     _bounceScale = TweenSequence<double>([
       TweenSequenceItem(
         tween: Tween(begin: 1.0, end: 1.32)
@@ -131,7 +106,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
         weight: 70,
       ),
     ]).animate(_bounce);
-    // Hop up, then drop back down with a bouncy landing.
     _hopOffset = TweenSequence<double>([
       TweenSequenceItem(
         tween: Tween(begin: 0.0, end: -34.0)
@@ -149,7 +123,6 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
       vsync: this,
       duration: const Duration(milliseconds: 450),
     );
-    // Swing left, right, then settle back with a little elastic wobble.
     _wiggleAngle = TweenSequence<double>([
       TweenSequenceItem(
         tween: Tween(begin: 0.0, end: -0.18)
@@ -168,16 +141,56 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
       ),
     ]).animate(_wiggle);
 
+    _walk = AnimationController(vsync: this);
+    _walk.addListener(() {
+      final pos = Offset.lerp(
+        _walkFrom,
+        _walkTo,
+        Curves.easeInOut.transform(_walk.value),
+      )!;
+      windowManager.setPosition(pos);
+    });
+    _walk.addStatusListener((status) {
+      if (status == AnimationStatus.completed) _scheduleWander();
+    });
+    _initWorkArea();
+
     // NOTE: spec defaults are water 45 min / stand 30 min. Using short test
     // intervals now so reminders are easy to observe; moves to Settings later.
     _reminders = ReminderScheduler(
       water: const Duration(seconds: 10),
       stand: const Duration(seconds: 16),
-      onWater: () => _react(_waterLines, emoji: '💧'),
-      onStand: () => _react(_standLines, emoji: '✨'),
+      onWater: () => _play(Reactions.water),
+      onStand: () => _play(Reactions.stand),
     )..start();
 
     _scheduleIdle();
+  }
+
+  /// Runs a reaction: play its animation, speak a random line, spray particles.
+  /// One entry point so every trigger behaves consistently.
+  void _play(Reaction r) {
+    switch (r.anim) {
+      case ReactionAnim.bounce:
+        _bounce.forward(from: 0);
+      case ReactionAnim.wiggle:
+        _wiggle.forward(from: 0);
+      case null:
+        break;
+    }
+    if (r.lines.isNotEmpty) {
+      _say(r.lines[_random.nextInt(r.lines.length)]);
+    }
+    final emoji = r.emoji;
+    if (emoji != null) _particles.emit(emoji, count: r.particleCount);
+  }
+
+  void _say(String text) {
+    setState(() => _bubble = text);
+    _bubbleTimer?.cancel();
+    _bubbleTimer = Timer(const Duration(milliseconds: 2500), () {
+      if (mounted) setState(() => _bubble = null);
+    });
   }
 
   // Self-initiated micro-actions so the cat feels alive when left alone.
@@ -192,36 +205,63 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   void _doIdleAction() {
     final r = _random.nextDouble();
     if (r < 0.45) {
-      _bounce.forward(from: 0);
+      _play(Reactions.idleBounce);
     } else if (r < 0.75) {
-      _wiggle.forward(from: 0);
+      _play(Reactions.idleWiggle);
     } else {
-      _say(_idleLines[_random.nextInt(_idleLines.length)]);
-      _particles.emit('💤', count: 3);
+      _play(Reactions.idleQuip);
     }
   }
 
-  void _react(List<String> lines, {String? emoji}) {
-    _bounce.forward(from: 0); // replay the bounce from the start
-    _say(lines[_random.nextInt(lines.length)]);
-    if (emoji != null) _particles.emit(emoji, count: 5);
+  Future<void> _initWorkArea() async {
+    final d = await screenRetriever.getPrimaryDisplay();
+    final pos = d.visiblePosition ?? Offset.zero;
+    final size = d.visibleSize ?? d.size;
+    _workArea = Rect.fromLTWH(pos.dx, pos.dy, size.width, size.height);
+    _scheduleWander();
   }
 
-  void _say(String text) {
-    setState(() => _bubble = text);
-    _bubbleTimer?.cancel();
-    _bubbleTimer = Timer(const Duration(milliseconds: 2500), () {
-      if (mounted) setState(() => _bubble = null);
-    });
+  void _scheduleWander() {
+    _wanderTimer?.cancel();
+    // Wander only a few times a day: next stroll in ~1.5-4 hours.
+    final minutes = 90 + _random.nextInt(151); // 90-240 min
+    _wanderTimer = Timer(Duration(minutes: minutes), _startWander);
+  }
+
+  Future<void> _startWander() async {
+    final wa = _workArea;
+    if (wa == null) return;
+    const win = 260.0;
+    final from = await windowManager.getPosition();
+    final maxX = (wa.width - win).clamp(0.0, double.infinity);
+    final maxY = (wa.height - win).clamp(0.0, double.infinity);
+    final to = Offset(
+      wa.left + _random.nextDouble() * maxX,
+      wa.top + _random.nextDouble() * maxY,
+    );
+    final dist = (to - from).distance;
+    if (dist < 8) {
+      _scheduleWander();
+      return;
+    }
+    _walkFrom = from;
+    _walkTo = to;
+    // Slow stroll (~90 px/s), clamped to a sane duration.
+    _walk.duration = Duration(
+      milliseconds: (dist / 90 * 1000).clamp(700, 4500).round(),
+    );
+    _walk.forward(from: 0);
   }
 
   @override
   void dispose() {
     _bubbleTimer?.cancel();
     _idleTimer?.cancel();
+    _wanderTimer?.cancel();
     _reminders.dispose();
     _bounce.dispose();
     _wiggle.dispose();
+    _walk.dispose();
     _clickThrough.dispose();
     super.dispose();
   }
@@ -236,23 +276,34 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
           Center(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => _react(_tapLines, emoji: '❤️'),
+              onTap: () => _play(Reactions.tap),
               onPanStart: (_) {
-                _wiggle.forward(from: 0);
-                _say(_dragLines[_random.nextInt(_dragLines.length)]);
-                _particles.emit('💫', count: 4);
+                _walk.stop(); // stop roaming while the user carries it
+                _play(Reactions.drag);
                 windowManager.startDragging();
+                _scheduleWander(); // resume roaming after a perch
               },
               child: AnimatedBuilder(
-                animation: Listenable.merge([_bounce, _wiggle]),
-                builder: (context, child) => Transform.translate(
-                  offset: Offset(0, _hopOffset.value),
-                  child: Transform.rotate(
-                    angle: _wiggleAngle.value,
-                    child: Transform.scale(
-                        scale: _bounceScale.value, child: child),
-                  ),
-                ),
+                animation: Listenable.merge([_bounce, _wiggle, _walk]),
+                builder: (context, child) {
+                  final s = _bounceScale.value;
+                  // Squash & stretch: taller -> narrower, and vice versa.
+                  final sx = 1 - (s - 1) * 0.7;
+                  final walkBob =
+                      _walk.isAnimating ? sin(_walk.value * pi * 6) * 4 : 0.0;
+                  return Transform.translate(
+                    offset: Offset(0, _hopOffset.value + walkBob),
+                    child: Transform.rotate(
+                      angle: _wiggleAngle.value,
+                      child: Transform.scale(
+                        scaleX: sx,
+                        scaleY: s,
+                        alignment: Alignment.bottomCenter,
+                        child: child,
+                      ),
+                    ),
+                  );
+                },
                 child: SizedBox(
                   width: 140,
                   height: 140,
