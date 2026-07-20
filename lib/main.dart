@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import 'click_through.dart';
+import 'particles.dart';
 import 'pet_view.dart';
 import 'reminders.dart';
 import 'speech_bubble.dart';
@@ -95,9 +96,18 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     '飞起来咯!',
     '晕…别晃我啦~',
   ];
+  static const List<String> _idleLines = <String>[
+    '喵~',
+    '在忙吗?',
+    '(打了个哈欠)',
+    '陪陪我嘛~',
+    '发会儿呆…',
+  ];
   final Random _random = Random();
 
+  final ParticleController _particles = ParticleController();
   late final ReminderScheduler _reminders;
+  Timer? _idleTimer;
 
   @override
   void initState() {
@@ -163,14 +173,38 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
     _reminders = ReminderScheduler(
       water: const Duration(seconds: 10),
       stand: const Duration(seconds: 16),
-      onWater: () => _react(_waterLines),
-      onStand: () => _react(_standLines),
+      onWater: () => _react(_waterLines, emoji: '💧'),
+      onStand: () => _react(_standLines, emoji: '✨'),
     )..start();
+
+    _scheduleIdle();
   }
 
-  void _react(List<String> lines) {
+  // Self-initiated micro-actions so the cat feels alive when left alone.
+  void _scheduleIdle() {
+    final ms = 6000 + _random.nextInt(9000); // fire every 6-15s
+    _idleTimer = Timer(Duration(milliseconds: ms), () {
+      _doIdleAction();
+      _scheduleIdle();
+    });
+  }
+
+  void _doIdleAction() {
+    final r = _random.nextDouble();
+    if (r < 0.45) {
+      _bounce.forward(from: 0);
+    } else if (r < 0.75) {
+      _wiggle.forward(from: 0);
+    } else {
+      _say(_idleLines[_random.nextInt(_idleLines.length)]);
+      _particles.emit('💤', count: 3);
+    }
+  }
+
+  void _react(List<String> lines, {String? emoji}) {
     _bounce.forward(from: 0); // replay the bounce from the start
     _say(lines[_random.nextInt(lines.length)]);
+    if (emoji != null) _particles.emit(emoji, count: 5);
   }
 
   void _say(String text) {
@@ -184,6 +218,7 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
   @override
   void dispose() {
     _bubbleTimer?.cancel();
+    _idleTimer?.cancel();
     _reminders.dispose();
     _bounce.dispose();
     _wiggle.dispose();
@@ -201,10 +236,11 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
           Center(
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => _react(_tapLines),
+              onTap: () => _react(_tapLines, emoji: '❤️'),
               onPanStart: (_) {
                 _wiggle.forward(from: 0);
                 _say(_dragLines[_random.nextInt(_dragLines.length)]);
+                _particles.emit('💫', count: 4);
                 windowManager.startDragging();
               },
               child: AnimatedBuilder(
@@ -230,6 +266,8 @@ class _PetHomeState extends State<PetHome> with TickerProviderStateMixin {
               ),
             ),
           ),
+          // Floating emoji particles (hearts on tap, sparkles on reminders...).
+          Positioned.fill(child: ParticleField(controller: _particles)),
           // Speech bubble, floating in the transparent area above the cat.
           if (_bubble != null)
             Positioned(
