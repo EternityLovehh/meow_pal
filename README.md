@@ -1,5 +1,7 @@
 # meow_pal 🐱
 
+**English** · [简体中文](README.zh-CN.md)
+
 A cross-platform **desktop pet cat**, built with Flutter. It floats on your
 desktop, keeps you company, and nudges you to drink water and stand up — all
 with gentle, non-intrusive on-screen reactions (no system notifications, no
@@ -50,6 +52,31 @@ flutter run -d macos      # or: flutter run -d windows
 > `flutterViewController.backgroundColor = .clear` (see
 > `macos/Runner/MainFlutterWindow.swift`). Since Flutter 3.7 this is required
 > or transparent content renders black.
+
+## Replace the pet (use your own art)
+
+The pet is just a Rive `.riv` file, and reactions are code-driven, so any
+cat/creature works — no per-asset animation wiring needed.
+
+1. **Get a `.riv`** (e.g. from the [rive.app community](https://rive.app/community/files/)).
+   Prefer a permissive license and an artboard **without a baked background**.
+2. **Drop it in** as `assets/rive/cat.riv` (overwrite). Keep the filename, or
+   change the path in `lib/pet_view.dart`.
+3. **State-machine name:** the code loads `'State Machine 1'`. If yours differs,
+   update both spots in `lib/pet_view.dart` (`stateMachines: [...]` and
+   `StateMachineController.fromArtboard(artboard, '...')`). Open the file in the
+   Rive editor to find the name.
+4. **Baked background?** Remove it in the Rive editor, or hide it at load time
+   by shape name in `RiveCatController.onRiveInit` (`lib/pet_view.dart`):
+   ```dart
+   final bg = artboard.component<Shape>('BG'); // your shape's name
+   bg?..scaleX = 0..scaleY = 0;
+   ```
+5. **Update attribution:** the license/credit line in `lib/settings_panel.dart`
+   and the Credits section below.
+6. **Different proportions?** Tweak the clickable area (`_petRect`) and the cat
+   size (`SizedBox`) in `lib/main.dart`.
+7. **Cold-rebuild** (`flutter run`) — asset changes aren't picked up by hot reload.
 
 ## Credits & license
 
